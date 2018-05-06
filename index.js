@@ -22,7 +22,6 @@ class ScriptServer extends EventsEmitter {
     super();
     this.config = defaultsDeep({}, config, defaultConfig);
     this.modules = [];
-    console.dir(this.config)
 
     // RCON
     this.rcon = new Rcon(this.config.core.rcon);
