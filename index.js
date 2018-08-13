@@ -1,19 +1,12 @@
 const EventsEmitter = require('events');
 const { spawn } = require('child_process');
 const defaultsDeep = require('lodash.defaultsdeep');
-const Rcon = require('./Rcon');
 
 const defaultConfig = {
   core: {
     jar: 'minecraft_server.jar',
     args: ['-Xmx2G'],
-    pipeIO: true,
-    spawnOpts: {},
-    rcon: {
-      port: '25575',
-      password: '0000',
-      buffer: 50,
-    },
+    spawnOpts: {}
   },
 };
 
@@ -21,20 +14,10 @@ class ScriptServer extends EventsEmitter {
   constructor(config = {}) {
     super();
     this.config = defaultsDeep({}, config, defaultConfig);
-    this.modules = [];
 
-    // RCON
-    this.rcon = new Rcon(this.config.core.rcon);
-    this.on('console', (l) => {
-      if (l.match(/\[RCON Listener #1\/INFO\]: RCON running/i)) this.rcon.connect();
-    });
+    process.on('exit',  this.stop);
+    process.on('close', this.stop);
 
-    // Pipe
-    process.stdin.on('data', (d) => {
-      if (this.config.core.pipeIO && this.spawn) this.spawn.stdin.write(d);
-    });
-    process.on('exit', () => this.stop());
-    process.on('close', () => this.stop());
   }
 
   start() {
@@ -43,50 +26,48 @@ class ScriptServer extends EventsEmitter {
     const args = this.config.core.args.concat('-jar', this.config.core.jar, 'nogui');
   
     this.spawn = spawn('java', args, this.config.core.spawnOpts);
-  
-    this.spawn.stdout.on('data', (d) => {
-      // Pipe
-      if (this.config.core.pipeIO) process.stdout.write(d);
+    
+    this.spawn.stdout.on('data', (d) => {  
+
       // Emit console
       d.toString().split('\n').forEach((l) => {
         if (l) this.emit('console', l);
       });
+    
     });
 
+    this.spawn.on("exit",data=>{
+      this.emit("exit", data)
+    })
+
     return this;
   }
 
-  stop() {
+  stop(force) {
     if (this.spawn) {
-      this.spawn.kill();
-      this.spawn = null;
+      if(force){
+        this.spawn.kill();
+        this.spawn = undefined;
+      }else{
+        this.send(new Buffer("stop\n"))
+        const stopListener = () =>{
+          this.spawn = undefined;
+          this.removeListener("exit", stopListener)
+        }
+        this.on("exit", stopListener)
+      }
+    }else{
+      console.log("server not runnung")
     }
 
     return this;
-  }
-
-  use(module) {
-    if (typeof module !== 'function') throw new Error('A module must be a function');
-
-    if (this.modules.filter(m => m === module).length === 0) {
-      this.modules.push(module);
-      module.call(this);
-    }
-
-    return this;
-  }
-
-  sendRcon(command) {
-    if(this.spawn){
-      return new Promise((resolve) => {
-        this.rcon.exec(command, result => resolve(result));
-      });
-    }
   }
 
   send(command){
     if(this.spawn){
-      this.spawn.stdin.write(command + "\n")
+      this.spawn.stdin.write(command)
+    }else{
+      console.log("server not running")
     }
   }
 }
